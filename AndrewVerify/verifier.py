@@ -1,3 +1,9 @@
+#
+# Created on Fri Jun 16 2023
+#
+# Copyright (c) 2023 Philip Zhu Chuyan <me@cyzhu.dev>
+#
+
 import requests
 from parse import *
 from xpinyin import Pinyin
