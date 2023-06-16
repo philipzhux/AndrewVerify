@@ -5,9 +5,7 @@
 #
 
 import requests
-from parse import *
-from xpinyin import Pinyin
-from tabulate import tabulate
+from .format import NameFormater, IOFormater
 from threading import Thread
 from queue import Queue
 
@@ -28,7 +26,6 @@ class AndrewVerifier:
     def __init__(self, concurrent = 15, url = "https://directory.andrew.cmu.edu/index.cgi"):
         self.url = url
         self.__results = []
-        self.pinyin = Pinyin()
         self.concurrent = concurrent
         self.q = Queue(self.concurrent * 2)
         for _ in range(self.concurrent):
@@ -36,20 +33,7 @@ class AndrewVerifier:
             t.daemon = True
             t.start()
 
-    '''
-    tabulateResults: a static utility function that tabulates the results
-    @param results: a list of dictionaries containing the result of verification
-    @return: a string containing the tabulated results
-    '''
-    @staticmethod
-    def tabulateResults(results):
-        results.sort(key = lambda result: result["is_INI"])
-        results.sort(key = lambda result: result["Verified"])
-        if len(results)>0:
-            header = results[0].keys()
-            rows =  [x.values() for x in results]
-            return tabulate(rows, header)
-        else: return ""
+
 
     '''
     verifyBatchString: verify a batch of names in a string concurently
@@ -73,14 +57,8 @@ class AndrewVerifier:
     def concurrentBatchVerify(self, verifiedLines, verifiedBy = None):
         if verifiedBy == None: verifiedBy = self.singleNameVerify
         self.__results.clear()
-        possibleParseRules = ["{:d}. {}","{:d}.{}","{:d} {}"]
         for line in verifiedLines:
-            for parseRule in possibleParseRules:
-                payload = parse(parseRule,line)
-                if payload: 
-                    payload = payload[1]
-                    break
-            else: payload = line
+            payload = IOFormater.inputLineParser(line)
             self.q.put((payload, self.singleNameVerify))
         print("Verifying ...\n")
         self.q.join()
@@ -95,20 +73,12 @@ class AndrewVerifier:
 
     def __verifyData(self,dataToVerify):
         result = {"Declared_Keyword": dataToVerify, "Verified": False, "Display_Name": "", "CMU_Email": "", "is_INI": False}
-        data = {
-            'action': 'Search',
-            'searchType': 'basic',
-            'activetab': 'basic',
-            'search': dataToVerify
-        }
-        response = requests.post(url = self.url, data=data)
-        stringPayload = response.content.decode()
-        parsed1 = parse("{}<b>Display Name:</b> {}<br /><b>Email:</b> {}<br /><b>Andrew UserID:</b> {}<br />{}",stringPayload)
-        if parsed1:
-            result["Display_Name"] = parsed1[1]
-            result["Verified"] = True
-            result["CMU_Email"] = parsed1[2]
-            result["is_INI"] = stringPayload.find("Information Networking Institute")!=-1
+        response = requests.post(url = self.url, data=IOFormater.andrewRequestFormater(searchData=dataToVerify))
+        andrewEntry = IOFormater.andrewResponseParser(response.content.decode())
+        result["Display_Name"] = andrewEntry.displayName
+        result["Verified"] = andrewEntry.verified
+        result["CMU_Email"] = andrewEntry.CMUEmail
+        result["is_INI"] = andrewEntry.is_INI
         return result
     
     '''
@@ -125,13 +95,7 @@ class AndrewVerifier:
     @return: a dictionary containing the result of verification
     '''
     def singleNameVerify(self, name):
-        chinesePhontonic = self.pinyin.get_pinyin(name,' ')
-        if name!=chinesePhontonic:
-            chinesePhontonic = chinesePhontonic.split()
-            lastName = chinesePhontonic[0].capitalize()
-            firstName = "".join(chinesePhontonic[1:]).capitalize()
-            name = f"{firstName} {lastName}"
-        return self.__verifyData(name)
+        return self.__verifyData(NameFormater.hybridAutoParser(name))
 
     '''
     verifyByKeyword: verify a name by keyword concurently
@@ -141,3 +105,8 @@ class AndrewVerifier:
     '''
     def singleKeywordVerify(self, keyword):
         return self.__verifyData(keyword)
+    
+
+    @staticmethod
+    def tabulateResults(results):
+        return IOFormater.tabulateResults(results)
